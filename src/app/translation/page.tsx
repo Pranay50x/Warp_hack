@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Languages, FileText, Download, Play, Pause, RotateCcw } from 'lucide-react';
+import Navigation from "../../components/Navigation";
 
 interface TranslationProgress {
   status: string;
@@ -201,207 +202,163 @@ export default function TranslationPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-800 mb-2">
-            PDF Translation Service
-          </h1>
-          <p className="text-lg text-gray-600">
-            Translate educational PDFs to regional Indian languages using AI
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Left Panel - Controls */}
-          <div className="space-y-6">
-            {/* File Upload */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4 flex items-center">
-                <Upload className="mr-2" />
-                Upload PDF
-              </h2>
-              
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="text-blue-600 hover:text-blue-800 font-medium"
-                >
-                  {selectedFile ? selectedFile.name : 'Click to select PDF file'}
-                </button>
-                {selectedFile && (
-                  <p className="text-sm text-gray-500 mt-2">
-                    Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Language Selection */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4 flex items-center">
-                <Languages className="mr-2" />
-                Target Language
-              </h2>
-              
-              <select
-                value={selectedLanguage}
-                onChange={handleLanguageSelect}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">Select a language</option>
-                {SUPPORTED_LANGUAGES.map((lang) => (
-                  <option key={lang.code} value={lang.code}>
-                    {lang.name} ({lang.script})
-                  </option>
-                ))}
-              </select>
-              
-              {selectedLanguage && (
-                <div className="mt-3 p-3 bg-blue-50 rounded-lg">
-                  <p className="text-sm text-blue-800">
-                    {SUPPORTED_LANGUAGES.find(l => l.code === selectedLanguage)?.description}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Translation Controls */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4 flex items-center">
-                <FileText className="mr-2" />
-                Translation Controls
-              </h2>
-              
-              <div className="space-y-3">
-                <button
-                  onClick={startTranslation}
-                  disabled={!selectedFile || !selectedLanguage || isTranslating}
-                  className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
-                >
-                  <Play className="mr-2" size={20} />
-                  {isTranslating ? 'Translating...' : 'Start Translation'}
-                </button>
-                
-                {isTranslating && (
-                  <button
-                    onClick={stopTranslation}
-                    className="w-full bg-red-600 text-white py-3 px-4 rounded-lg hover:bg-red-700 flex items-center justify-center"
-                  >
-                    <Pause className="mr-2" size={20} />
-                    Stop Translation
-                  </button>
-                )}
-                
-                <button
-                  onClick={resetTranslation}
-                  className="w-full bg-gray-600 text-white py-3 px-4 rounded-lg hover:bg-gray-700 flex items-center justify-center"
-                >
-                  <RotateCcw className="mr-2" size={20} />
-                  Reset
-                </button>
-              </div>
-            </div>
+    <>
+      <Navigation />
+      <main className="min-h-screen w-full bg-gradient-to-br from-[#181C2A] via-[#23263A] to-[#23263A] text-gray-100 px-4 md:px-8 pt-8">
+        <div className="max-w-7xl mx-auto">
+          {/* Header */}
+          <div className="text-center mb-10">
+            <h1 className="text-4xl md:text-5xl font-extrabold mb-2 text-teal-200 drop-shadow">PDF Translation Service</h1>
+            <p className="text-lg text-gray-300">Translate educational PDFs to regional Indian languages using AI</p>
           </div>
 
-          {/* Right Panel - Live Preview */}
-          <div className="space-y-6">
-            {/* Progress Display */}
-            {progress && (
-              <div className="bg-white rounded-lg shadow-md p-6">
-                <h2 className="text-xl font-semibold mb-4 flex items-center">
-                  <span className="mr-2">{getStatusIcon(progress.status)}</span>
-                  Translation Progress
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+            {/* Left Panel - Controls */}
+            <div className="space-y-8">
+              {/* File Upload */}
+              <div className="bg-[#23263A] rounded-2xl shadow-xl p-8 border border-[#2c2f4a]">
+                <h2 className="text-xl font-semibold mb-4 flex items-center text-teal-200">
+                  <Upload className="mr-2" /> Upload PDF
                 </h2>
-                
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className={`font-medium ${getStatusColor(progress.status)}`}>
-                      {progress.status.replace('_', ' ').toUpperCase()}
-                    </span>
-                    <span className="text-sm text-gray-500">
-                      {Math.round(progress.progress * 100)}%
-                    </span>
-                  </div>
-                  
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${progress.progress * 100}%` }}
-                    ></div>
-                  </div>
-                  
-                  {progress.current_page && progress.total_pages && (
-                    <p className="text-sm text-gray-600">
-                      Page {progress.current_page} of {progress.total_pages}
+                <div className="border-2 border-dashed border-teal-400/40 rounded-lg p-6 bg-[#181C2A] text-center hover:border-teal-300 transition-all">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-teal-300 hover:underline font-medium"
+                  >
+                    {selectedFile ? selectedFile.name : 'Click to select PDF file'}
+                  </button>
+                  {selectedFile && (
+                    <p className="text-sm text-gray-400 mt-2">
+                      Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
                     </p>
                   )}
-                  
-                  {progress.error && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                      <p className="text-red-800 text-sm">{progress.error}</p>
-                    </div>
-                  )}
                 </div>
               </div>
-            )}
 
-            {/* Live Preview */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4">Live Preview</h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Original Text */}
-                <div>
-                  <h3 className="font-medium text-gray-700 mb-2">Original Text</h3>
-                  <div className="bg-gray-50 p-3 rounded-lg h-64 overflow-y-auto text-sm">
-                    {progress?.original_text || 'No text to display'}
+              {/* Language Selection */}
+              <div className="bg-[#23263A] rounded-2xl shadow-xl p-8 border border-[#2c2f4a]">
+                <h2 className="text-xl font-semibold mb-4 flex items-center text-purple-200">
+                  <Languages className="mr-2" /> Target Language
+                </h2>
+                <select
+                  value={selectedLanguage}
+                  onChange={handleLanguageSelect}
+                  className="w-full p-3 border border-[#2c2f4a] rounded-lg focus:ring-2 focus:ring-teal-400 bg-[#181C2A] text-gray-100"
+                >
+                  <option value="">Select a language</option>
+                  {SUPPORTED_LANGUAGES.map((lang) => (
+                    <option key={lang.code} value={lang.code} className="bg-[#23263A]">
+                      {lang.name} ({lang.script})
+                    </option>
+                  ))}
+                </select>
+                {selectedLanguage && (
+                  <div className="mt-3 p-3 bg-[#181C2A] rounded-lg">
+                    <p className="text-sm text-teal-200">
+                      {SUPPORTED_LANGUAGES.find(l => l.code === selectedLanguage)?.description}
+                    </p>
                   </div>
-                </div>
-                
-                {/* Translated Text */}
-                <div>
-                  <h3 className="font-medium text-gray-700 mb-2">Translated Text</h3>
-                  <div className="bg-blue-50 p-3 rounded-lg h-64 overflow-y-auto text-sm">
-                    {progress?.translated_text || 'Translation will appear here'}
-                  </div>
+                )}
+              </div>
+
+              {/* Translation Controls */}
+              <div className="bg-[#23263A] rounded-2xl shadow-xl p-8 border border-[#2c2f4a]">
+                <h2 className="text-xl font-semibold mb-4 flex items-center text-blue-200">
+                  <FileText className="mr-2" /> Translation Controls
+                </h2>
+                <div className="space-y-3">
+                  <button
+                    onClick={startTranslation}
+                    disabled={!selectedFile || !selectedLanguage || isTranslating}
+                    className="w-full bg-gradient-to-r from-teal-400 via-purple-500 to-blue-500 text-white py-3 px-4 rounded-xl font-bold shadow-lg hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center transition-all duration-200"
+                  >
+                    <Play className="mr-2" size={20} />
+                    {isTranslating ? 'Translating...' : 'Start Translation'}
+                  </button>
+                  {isTranslating && (
+                    <button
+                      onClick={stopTranslation}
+                      className="w-full bg-gradient-to-r from-red-400 to-red-600 text-white py-3 px-4 rounded-xl font-bold shadow-lg hover:scale-105 flex items-center justify-center transition-all duration-200"
+                    >
+                      <Pause className="mr-2" size={20} />
+                      Stop Translation
+                    </button>
+                  )}
+                  <button
+                    onClick={resetTranslation}
+                    className="w-full bg-gradient-to-r from-gray-600 to-gray-800 text-white py-3 px-4 rounded-xl font-bold shadow-lg hover:scale-105 flex items-center justify-center transition-all duration-200"
+                  >
+                    <RotateCcw className="mr-2" size={20} />
+                    Reset
+                  </button>
                 </div>
               </div>
             </div>
 
-            {/* Translation History */}
-            {translationHistory.length > 0 && (
-              <div className="bg-white rounded-lg shadow-md p-6">
-                <h2 className="text-xl font-semibold mb-4">Translation History</h2>
-                
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {translationHistory.map((item, index) => (
-                    <div key={index} className="flex items-center space-x-2 p-2 bg-gray-50 rounded">
-                      <span>{getStatusIcon(item.status)}</span>
-                      <span className={`text-sm ${getStatusColor(item.status)}`}>
-                        {item.status.replace('_', ' ')}
-                      </span>
-                      {item.progress && (
-                        <span className="text-xs text-gray-500">
-                          {Math.round(item.progress * 100)}%
-                        </span>
-                      )}
+            {/* Right Panel - Live Preview */}
+            <div className="space-y-8">
+              {/* Progress Display */}
+              {progress && (
+                <div className="bg-[#23263A] rounded-2xl shadow-xl p-8 border border-[#2c2f4a]">
+                  <h2 className="text-xl font-semibold mb-4 flex items-center text-lime-200">
+                    <span className="mr-2">{getStatusIcon(progress.status)}</span>
+                    Translation Progress
+                  </h2>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className={`font-medium ${getStatusColor(progress.status)}`}>{progress.status.replace('_', ' ').toUpperCase()}</span>
+                      <span className="text-sm text-gray-400">{Math.round(progress.progress * 100)}%</span>
                     </div>
-                  ))}
+                    <div className="w-full bg-gray-700 rounded-full h-2">
+                      <div
+                        className="bg-gradient-to-r from-teal-400 via-purple-500 to-blue-500 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${progress.progress * 100}%` }}
+                      ></div>
+                    </div>
+                    {progress.current_page && progress.total_pages && (
+                      <p className="text-sm text-gray-400">
+                        Page {progress.current_page} of {progress.total_pages}
+                      </p>
+                    )}
+                    {progress.error && (
+                      <div className="p-3 bg-red-900/30 border border-red-400 rounded-lg">
+                        <p className="text-red-300 text-sm">{progress.error}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {/* Live Preview */}
+              <div className="bg-[#23263A] rounded-2xl shadow-xl p-8 border border-[#2c2f4a]">
+                <h2 className="text-xl font-semibold mb-4 text-blue-200">Live Preview</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Original Text */}
+                  <div>
+                    <h3 className="font-medium text-teal-200 mb-2">Original Text</h3>
+                    <div className="bg-[#181C2A] p-3 rounded-lg h-64 overflow-y-auto text-sm text-gray-100 border border-[#2c2f4a]">
+                      {progress?.original_text || 'No text to display'}
+                    </div>
+                  </div>
+                  {/* Translated Text */}
+                  <div>
+                    <h3 className="font-medium text-purple-200 mb-2">Translated Text</h3>
+                    <div className="bg-[#181C2A] p-3 rounded-lg h-64 overflow-y-auto text-sm text-gray-100 border border-[#2c2f4a]">
+                      {progress?.translated_text || 'Translation will appear here'}
+                    </div>
+                  </div>
                 </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
-      </div>
-    </div>
+      </main>
+    </>
   );
 } 
