@@ -3,6 +3,7 @@ import './globals.css'
 import { ThemeProvider } from '@/components/providers/theme-provider'
 import { Toaster } from 'sonner'
 
+
 const inter = Inter({ subsets: ['latin'] })
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
@@ -32,9 +33,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body className="min-h-screen bg-black text-white font-sans">
         <SessionProviderWrapper>
+          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+            <Toaster richColors />
           <AuthGuard>
             {children}
           </AuthGuard>
+          </ThemeProvider>
         </SessionProviderWrapper>
       </body>
     </html>
