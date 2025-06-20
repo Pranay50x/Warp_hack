@@ -1,10 +1,14 @@
 "use client";
 import { useRouter } from "next/navigation";
+import AuthButton from "@/components/AuthButton";
 
 export default function Dashboard() {
   const router = useRouter();
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-gray-100 via-white to-gray-200 text-gray-900 px-6">
+      <div className="absolute top-6 right-6">
+        <AuthButton />
+      </div>
       <div className="text-center mb-12">
         <h2 className="text-4xl md:text-5xl font-serif font-bold mb-4 animate-fade-in">
           Dashboard
@@ -28,6 +32,11 @@ export default function Dashboard() {
           label="Translation"
           color="bg-purple-600"
           onClick={() => router.push("/translation")}
+        />
+        <DashboardButton
+          label="Multi-Agent PDF QA"
+          color="bg-orange-600"
+          onClick={() => router.push("/multi_agent")}
         />
       </div>
 

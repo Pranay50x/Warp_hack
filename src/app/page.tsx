@@ -42,9 +42,9 @@ export default function LandingPage() {
         </p>
         <button
           className="px-6 py-3 rounded-lg bg-gray-900 text-white text-lg font-medium hover:bg-gray-700 transition-all duration-200"
-          onClick={() => router.push("/dashboard")}
+          onClick={() => router.push("/auth")}
         >
-          Enter Dashboard
+          Get Started
         </button>
       </div>
 
