@@ -2,6 +2,7 @@
 import { useState, ChangeEvent, useEffect } from "react";
 import { Upload, Brain, Search, FileText, Database, Plus, BookOpen, ChevronDown, ChevronUp } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import Navigation from "../../components/Navigation";
 import KnowledgeBaseQuery from "../../components/KnowledgeBaseQuery";
 import UserDocuments from "../../components/UserDocuments";
@@ -19,17 +20,8 @@ const QUERY_SUGGESTIONS = [
   { value: "theories", label: "Theories", description: "Focus on theoretical concepts and frameworks" },
 ];
 
-// Mock user object - replace with your actual user state
-const useUser = () => {
-  return {
-    user: {
-      email: "user@gmail.com", // Example email
-    },
-    isLoaded: true,
-  };
-};
-
 export default function MindmapUploadPage() {
+  const { data: session, status } = useSession();
   const [file, setFile] = useState<File | null>(null);
   const [query, setQuery] = useState("all");
   const [customQuery, setCustomQuery] = useState("");
@@ -41,15 +33,16 @@ export default function MindmapUploadPage() {
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
   const [showUserDocuments, setShowUserDocuments] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<string | null>(null);
-  const { user, isLoaded } = useUser(); // Use the mock user hook
   const [userId, setUserId] = useState("");
   const router = useRouter();
 
   useEffect(() => {
-    if (isLoaded && user) {
-      setUserId(user.email);
+    if (status === "authenticated" && session?.user?.email) {
+      setUserId(session.user.email);
+    } else if (status === "unauthenticated") {
+      router.replace("/auth");
     }
-  }, [isLoaded, user]);
+  }, [status, session, router]);
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -178,7 +171,7 @@ export default function MindmapUploadPage() {
             <p className="text-gray-300">
               Upload your PDF and leverage your personal knowledge base for intelligent mindmap generation.
             </p>
-            {isLoaded && userId && <p className="text-sm text-teal-400 mt-2">Logged in as: {userId}</p>}
+            {status === "authenticated" && userId && <p className="text-sm text-teal-400 mt-2">Logged in as: {userId}</p>}
           </header>
 
           <section>
