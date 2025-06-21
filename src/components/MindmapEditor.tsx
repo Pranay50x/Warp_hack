@@ -24,18 +24,44 @@ function mindmapToD3Tree(mindmap: any) {
 }
 
 // Helper: Convert d3 tree to React Flow nodes/edges (radial layout)
-function d3TreeToFlow(tree: any, center = { x: 800, y: 350 }, radiusStep = 180) {
+function d3TreeToFlow(tree: any, center = { x: 800, y: 350 }, radiusStep = 250) {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
   const descendants = tree.descendants();
   const leaves = tree.leaves();
   const maxDepth = Math.max(...descendants.map((d: any) => d.depth));
-  // Radial layout
+  
+  // Calculate optimal spacing based on number of nodes at each level
+  const nodesAtDepth = new Map<number, any[]>();
+  descendants.forEach((d: any) => {
+    const depth = d.depth;
+    if (!nodesAtDepth.has(depth)) {
+      nodesAtDepth.set(depth, []);
+    }
+    nodesAtDepth.get(depth)!.push(d);
+  });
+  
+  // Improved radial layout with better spacing
   descendants.forEach((d: any, i: number) => {
-    const angle = ((d as any).x / (2 * Math.PI)) * 360;
-    const r = d.depth * radiusStep;
-    const x = center.x + r * Math.cos((d as any).x - Math.PI / 2);
-    const y = center.y + r * Math.sin((d as any).x - Math.PI / 2);
+    const depth = d.depth;
+    const nodesAtThisDepth = nodesAtDepth.get(depth) || [];
+    const nodeIndex = nodesAtThisDepth.findIndex(node => node.data._id === d.data._id);
+    
+    // Calculate angle based on position within the level
+    let angle;
+    if (depth === 0) {
+      // Root node at center
+      angle = 0;
+    } else {
+      // Distribute nodes evenly around the circle at each level
+      const totalNodesAtLevel = nodesAtThisDepth.length;
+      angle = (nodeIndex / totalNodesAtLevel) * 2 * Math.PI;
+    }
+    
+    const r = depth * radiusStep;
+    const x = center.x + r * Math.cos(angle - Math.PI / 2);
+    const y = center.y + r * Math.sin(angle - Math.PI / 2);
+    
     nodes.push({
       id: d.data._id,
       data: {
@@ -58,6 +84,7 @@ function d3TreeToFlow(tree: any, center = { x: 800, y: 350 }, radiusStep = 180) 
       },
       draggable: true,
     });
+    
     if (d.parent) {
       edges.push({
         id: `${d.parent.data._id}->${d.data._id}`,
@@ -87,7 +114,7 @@ interface MindmapEditorProps {
   mindmap: any;
 }
 
-const CustomNode = ({ id, data, selected, setEditingNodeId, setEditValue, onAddChild, onDelete, isRoot, setSidebarNode }: any) => {
+const CustomNode = ({ id, data, selected, setEditingNodeId, setEditValue, onAddChild, onDelete, isRoot, setSidebarNode, hideButtons }: any) => {
   return (
     <div
       style={{
@@ -126,23 +153,25 @@ const CustomNode = ({ id, data, selected, setEditingNodeId, setEditValue, onAddC
         </div>
       )}
       {data.text && <div style={{ fontSize: 13, color: "#cbd5e1", marginBottom: 4 }}>{data.text}</div>}
-      <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
-        <button
-          style={{ fontSize: 13, color: "#22d3ee", background: "#0e7490", border: "none", borderRadius: 6, padding: "2px 10px", cursor: "pointer" }}
-          onClick={() => onAddChild(id)}
-          title="Add child node"
-        >+
-        </button>
-        {!isRoot && (
+      {!hideButtons && (
+        <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
           <button
-            style={{ fontSize: 13, color: "#c00", background: "#fee2e2", border: "none", borderRadius: 6, padding: "2px 10px", cursor: "pointer" }}
-            onClick={() => onDelete(id)}
-            title="Delete node"
-          >
-            ×
+            style={{ fontSize: 13, color: "#22d3ee", background: "#0e7490", border: "none", borderRadius: 6, padding: "2px 10px", cursor: "pointer" }}
+            onClick={() => onAddChild(id)}
+            title="Add child node"
+          >+
           </button>
-        )}
-      </div>
+          {!isRoot && (
+            <button
+              style={{ fontSize: 13, color: "#c00", background: "#fee2e2", border: "none", borderRadius: 6, padding: "2px 10px", cursor: "pointer" }}
+              onClick={() => onDelete(id)}
+              title="Delete node"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      )}
       <Handle type="source" position={Position.Bottom} />
     </div>
   );
@@ -159,6 +188,7 @@ const MindmapEditor: React.FC<MindmapEditorProps> = ({ mindmap }) => {
   const [editValue, setEditValue] = useState<string>("");
   const [sidebarNodeId, setSidebarNodeId] = useState<string | null>(null);
   const [sidebarEdgeId, setSidebarEdgeId] = useState<string | null>(null);
+  const [hideButtons, setHideButtons] = useState(false);
   const flowWrapper = useRef<HTMLDivElement>(null);
   const reactFlowInstance = useReactFlow();
 
@@ -186,6 +216,7 @@ const MindmapEditor: React.FC<MindmapEditorProps> = ({ mindmap }) => {
             onDelete: handleDeleteNode,
             isRoot: i === 0,
             setSidebarNode: setSidebarNodeId,
+            hideButtons,
           },
         },
       }));
@@ -193,7 +224,7 @@ const MindmapEditor: React.FC<MindmapEditorProps> = ({ mindmap }) => {
       setEdges(initialEdges);
     }
     // eslint-disable-next-line
-  }, [mindmap]);
+  }, [mindmap, hideButtons]);
 
   // Add child node
   const handleAddChild = useCallback((parentId: string) => {
@@ -216,6 +247,7 @@ const MindmapEditor: React.FC<MindmapEditorProps> = ({ mindmap }) => {
             onDelete: handleDeleteNode,
             isRoot: false,
             setSidebarNode: setSidebarNodeId,
+            hideButtons,
           },
         },
         position: {
@@ -236,7 +268,7 @@ const MindmapEditor: React.FC<MindmapEditorProps> = ({ mindmap }) => {
       }));
       return nds.concat(newNode);
     });
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, hideButtons]);
 
   // Delete node (and its children)
   const handleDeleteNode = useCallback((nodeId: string) => {
@@ -322,13 +354,55 @@ const MindmapEditor: React.FC<MindmapEditorProps> = ({ mindmap }) => {
   // Download as SVG
   const handleDownloadSvg = async () => {
     if (!flowWrapper.current) return;
-    const node = flowWrapper.current.querySelector(".react-flow") as HTMLElement;
-    if (!node) return;
-    const dataUrl = await domtoimage.toSvg(node);
-    const link = document.createElement("a");
-    link.href = dataUrl;
-    link.download = `mindmap-${Date.now()}.svg`;
-    link.click();
+    
+    // Temporarily hide buttons for SVG generation
+    setHideButtons(true);
+    
+    // Wait for the next render cycle to ensure buttons are hidden
+    setTimeout(async () => {
+      const node = flowWrapper.current?.querySelector(".react-flow") as HTMLElement;
+      if (!node) return;
+      
+      try {
+        // Fit view to ensure all nodes are visible within canvas bounds
+        reactFlowInstance.fitView({ 
+          padding: 0.2, 
+          includeHiddenNodes: false,
+          minZoom: 0.3,
+          maxZoom: 1.2
+        });
+        
+        // Wait a bit for the fit view to complete
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        const dataUrl = await domtoimage.toSvg(node, {
+          width: 1400,
+          height: 1000,
+          style: {
+            'transform': 'scale(1)',
+            'transform-origin': 'top left',
+            'background': '#181a20'
+          },
+          filter: (node: any) => {
+            // Filter out any elements that might cause white patches
+            const className = String(node.className || '');
+            return !className.includes('react-flow__controls') && 
+                   !className.includes('react-flow__minimap') &&
+                   !className.includes('react-flow__panel');
+          }
+        });
+        
+        const link = document.createElement("a");
+        link.href = dataUrl;
+        link.download = `mindmap-${Date.now()}.svg`;
+        link.click();
+      } catch (error) {
+        console.error("Error generating SVG:", error);
+      } finally {
+        // Restore buttons after SVG generation
+        setHideButtons(false);
+      }
+    }, 100);
   };
 
   return (
@@ -413,7 +487,7 @@ const MindmapEditor: React.FC<MindmapEditorProps> = ({ mindmap }) => {
               marginBottom: 8,
             }}
           >
-            Download as SVG
+            Download
           </button>
         </div>
         <div ref={flowWrapper} style={{ width: "100%", height: 650, fontFamily: "Inter, Arial, sans-serif" }}>
