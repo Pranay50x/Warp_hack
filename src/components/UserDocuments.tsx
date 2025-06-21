@@ -35,7 +35,12 @@ export default function UserDocuments({ userId, onSelectDocument, onDeleteDocume
       
       const data = await response.json();
       if (data.status === "success") {
-        setDocuments(data.documents || []);
+        // Filter for unique documents based on filename
+        const uniqueDocuments = data.documents.filter(
+          (doc: Document, index: number, self: Document[]) =>
+            index === self.findIndex((d) => d.filename === doc.filename)
+        );
+        setDocuments(uniqueDocuments || []);
       } else {
         setDocuments([]);
       }
