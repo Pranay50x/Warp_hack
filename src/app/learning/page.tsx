@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { FileUpload } from '@/components/file-upload';
 import { Message } from '@/components/message';
 import { QuizInterface } from '@/components/quiz-interface';
+import { MarkdownContent } from '@/components/markdown-content';
 import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
 
@@ -23,6 +24,15 @@ export interface ChatMessage {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+const getUserId = () => {
+  let userId = localStorage.getItem('learning_user_id');
+  if (!userId) {
+    userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    localStorage.setItem('learning_user_id', userId);
+  }
+  return userId;
+};
+
 export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -32,12 +42,16 @@ export default function Home() {
       timestamp: new Date(),
     }
   ]);
+
+
+
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const [currentQuiz, setCurrentQuiz] = useState<any>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const { theme, setTheme } = useTheme();
+  const [currentUserId] = useState(()=>getUserId());
 
   const scrollToBottom = () => {
     if (scrollAreaRef.current) {
@@ -104,9 +118,12 @@ export default function Home() {
     formData.append('pdf_file', file);
     formData.append('chunk_size', '500');
     formData.append('overlap', '50');
+    formData.append('user_id', currentUserId);
 
     try {
       console.log('Uploading to:', `${API_BASE_URL}/ingest_pdf`);
+      console.log('With User ID:', currentUserId);
+      
       
       const response = await fetch(`${API_BASE_URL}/ingest_pdf`, {
         method: 'POST',
@@ -126,13 +143,13 @@ export default function Home() {
         setUploadedFiles(prev => [...prev, result.pdf]);
         addMessage({
           type: 'assistant',
-          content: `Perfect! I've successfully processed "${result.pdf}" and created ${result.chunks} knowledge chunks from it. Now I can help you understand the content, generate study questions, create quizzes, and much more. What would you like to explore first?`,
+          content: `## 📄 PDF Processing Complete!\n\nPerfect! I've successfully processed **"${result.pdf}"** and created **${result.chunks} knowledge chunks** from it.\n\n### What I can help you with now:\n- 🧠 **Explain complex concepts** from your document\n- ❓ **Generate study questions** to test your understanding\n- 📝 **Create interactive quizzes** with detailed feedback\n- 🔗 **Find additional resources** that complement your material\n- 💪 **Provide study motivation** and learning strategies\n\n**What would you like to explore first?** Just ask me anything about your document!`,
         });
         toast.success(`PDF processed successfully! ${result.chunks} chunks created.`);
       } else {
         addMessage({
           type: 'assistant',
-          content: `I encountered an error while processing your PDF: ${result.message}. Please try uploading the file again or check if it's a valid PDF document.`,
+          content: `## ⚠️ Processing Error\n\nI encountered an error while processing your PDF:\n\n> ${result.message}\n\nPlease try uploading the file again or check if it's a valid PDF document.`,
         });
         toast.error(`Failed to process PDF: ${result.message}`);
       }
@@ -148,7 +165,7 @@ export default function Home() {
       
       addMessage({
         type: 'assistant',
-        content: `I'm having trouble connecting to my processing system: ${errorMessage}. Please make sure the backend server is running and try again.`,
+        content: `## 🔌 Connection Issue\n\nI'm having trouble connecting to my processing system:\n\n> ${errorMessage}\n\nPlease make sure the backend server is running and try again.`,
       });
       toast.error(`Upload failed: ${errorMessage}`);
     } finally {
@@ -195,9 +212,8 @@ export default function Home() {
     if (!uploadedFiles.length && agent !== 'resource_curator' && agent !== 'motivation_agent') {
       addMessage({
         type: 'assistant',
-        content: 'I\'d love to help you with that! However, I need you to upload a PDF document first so I can provide accurate information based on your specific content. Please upload a PDF and then ask me again.',
+        content: '## 📄 PDF Required\n\nI\'d love to help you with that! However, I need you to upload a PDF document first so I can provide accurate information based on your specific content.\n\n**Please upload a PDF and then ask me again.**',
       });
-      toast.error('Please upload a PDF first!');
       return;
     }
 
@@ -211,28 +227,28 @@ export default function Home() {
       switch (agent) {
         case 'concept_explorer':
           endpoint = '/concept_explorer';
-          payload = { query: userInput, top_k: 8 };
-          processingMessage = 'Let me analyze the content and break down this concept for you...';
+          payload = { query: userInput, top_k: 8, user_id: currentUserId };
+          processingMessage = '## Analyzing Content\n\nLet me analyze the content and break down this concept for you...';
           break;
         case 'question_agent':
           endpoint = '/question_agent';
-          payload = { topic: userInput, num_questions: 5, top_k: 8 };
-          processingMessage = 'I\'m generating important study questions based on your document...';
+          payload = { topic: userInput, num_questions: 5, top_k: 8, user_id: currentUserId };
+          processingMessage = '## Generating Questions\n\nI\'m generating important study questions based on your document...';
           break;
         case 'quiz_agent':
           endpoint = '/quiz_agent';
-          payload = { topic: userInput, num_questions: 3, top_k: 8 };
-          processingMessage = 'Creating an interactive quiz for you...';
+          payload = { topic: userInput, num_questions: 3, top_k: 8, user_id: currentUserId };
+          processingMessage = '## Creating Quiz\n\nCreating an interactive quiz for you...';
           break;
         case 'motivation_agent':
           endpoint = '/motivation_agent';
-          payload = { user_id: 'user1', quiz_score: null, engagement_data: null };
-          processingMessage = 'Let me provide some encouragement and study tips...';
+          payload = { user_id: currentUserId, quiz_score: null, engagement_data: null };
+          processingMessage = '## Preparing Motivation\n\nLet me provide some encouragement and study tips...';
           break;
         case 'resource_curator':
           endpoint = '/resource_curator';
-          payload = { topic: userInput, num_resources: 5 };
-          processingMessage = 'Searching for additional learning resources...';
+          payload = { topic: userInput, num_resources: 5, user_id: currentUserId };
+          processingMessage = '## Finding Resources\n\nSearching for additional learning resources...';
           break;
       }
 
@@ -268,7 +284,7 @@ export default function Home() {
           setCurrentQuiz(result);
           addMessage({
             type: 'assistant',
-            content: `Great! I've created a quiz on "${result.topic}" with ${result.total_questions} questions. Take your time answering each question - I'll provide detailed feedback once you submit your answers.`,
+            content: `## 📝 Quiz Ready!\n\nGreat! I've created a quiz on **"${result.topic}"** with **${result.total_questions || result.questions?.length || 3} questions**.\n\n### Instructions:\n- Take your time answering each question\n- You can navigate between questions using the buttons\n- I'll provide detailed feedback once you submit your answers\n\n**Good luck! 🍀**`,
             data: result,
           });
         } else {
@@ -282,7 +298,7 @@ export default function Home() {
       } else {
         addMessage({
           type: 'assistant',
-          content: `I encountered an issue while processing your request: ${result.message}. Please try rephrasing your question or check if your PDF was uploaded correctly.`,
+          content: `## ⚠️ Processing Error\n\nI encountered an issue while processing your request:\n\n> ${result.message}\n\nPlease try rephrasing your question or check if your PDF was uploaded correctly.`,
         });
         toast.error(`Error: ${result.message}`);
       }
@@ -300,7 +316,7 @@ export default function Home() {
       setMessages(prev => prev.slice(0, -1));
       addMessage({
         type: 'assistant',
-        content: `I'm having trouble processing your request right now: ${errorMessage}. Please check your connection and try again.`,
+        content: `## 🔌 Connection Error\n\nI'm having trouble processing your request right now:\n\n> ${errorMessage}\n\nPlease check your connection and try again.`,
       });
       toast.error(`Failed to get response: ${errorMessage}`);
     } finally {
@@ -308,66 +324,98 @@ export default function Home() {
     }
   };
 
-  // ...rest of your existing code remains the same...
+// ...existing code...
+
 const formatAgentResponse = (agent: string, result: any, userInput: string): string => {
   switch (agent) {
     case 'concept_explorer':
-      return `## Understanding: ${result.topic || userInput}\n\n${result.breakdown}\n\n**Key Areas to Focus On:**\n${result.subtopics ? result.subtopics.map((topic: any) => `• ${topic.name || topic}`).join('\n') : 'No subtopics identified'}\n\nFeel free to ask me to dive deeper into any of these areas or ask for study questions!`;
+      const topic = result.topic || userInput;
+      let conceptText = `## Understanding: ${topic}\n\n${result.breakdown}\n\n`;
+      
+      if (result.subtopics && result.subtopics.length > 0) {
+        conceptText += `### Key Areas to Focus On:\n\n`;
+        
+        result.subtopics.forEach((subtopic: any, index: number) => {
+          conceptText += `**${index + 1}. ${subtopic.name}**\n`;
+          if (subtopic.explanation) {
+            conceptText += `${subtopic.explanation}\n`;
+          }
+          if (subtopic.importance) {
+            conceptText += `*Why it matters: ${subtopic.importance}*\n`;
+          }
+          conceptText += `\n`;
+        });
+      } else {
+        conceptText += `### Key Areas to Focus On:\n\nNo specific subtopics were identified from the content.\n\n`;
+      }
+      
+      conceptText += `---\n\n**Next Steps:** Feel free to ask me to dive deeper into any of these areas or ask for study questions!`;
+      return conceptText;
     
     case 'question_agent':
-      return `## Study Questions for "${result.topic || userInput}"\n\nHere are some important questions to help you master this topic:\n\n${result.questions ? result.questions.map((q: any, i: number) => `${i + 1}. ${q.question || q}`).join('\n\n') : 'No questions generated'}\n\nTry answering these questions, and if you'd like, I can create a quiz to test your knowledge!`;
+      const questionsText = result.questions && result.questions.length > 0
+        ? result.questions.map((q: any, i: number) => `**${i + 1}.** ${q.question || q}`).join('\n\n')
+        : 'No questions were generated';
+      
+      return `## Study Questions: "${result.topic || userInput}"\n\nHere are some important questions to help you master this topic:\n\n${questionsText}\n\n---\n\n**Study Tip:** Try answering these questions, and if you'd like, I can create a quiz to test your knowledge!`;
     
     case 'motivation_agent':
       const motivationMessage = result.motivation_message || result.message || 'Keep up the great work!';
       const recommendations = result.recommendations || [];
-      return `## 💪 Study Motivation\n\n${motivationMessage}\n\n**Here are some personalized recommendations:**\n${recommendations.map((rec: string) => `• ${rec}`).join('\n')}\n\nRemember, every expert was once a beginner. You've got this! 🌟`;
+      const recommendationsText = recommendations.length > 0 
+        ? recommendations.map((rec: string) => `- ${rec}`).join('\n')
+        : '- Stay consistent with your study schedule\n- Take regular breaks\n- Practice active recall';
+      
+      return `## Study Motivation\n\n${motivationMessage}\n\n### Personalized Recommendations:\n${recommendationsText}\n\n---\n\n**Remember:** Every expert was once a beginner. You have the ability to master this!`;
     
     case 'resource_curator':
       const strategy = result.search_strategy || 'general';
       const contextSummary = result.context_summary || `Found ${result.resources?.length || 0} learning resources`;
-      const topic = result.topic || userInput;
+      const resourceTopic = result.topic || userInput;
       
-      let resourceText = `## 🔗 Additional Learning Resources\n\n${contextSummary}\n\n`;
+      let resourceText = `## Additional Learning Resources\n\n${contextSummary}\n\n`;
       
       if (strategy === 'pdf_contextual') {
-        resourceText += `**Based on your PDF content, I recommend:**\n\n`;
+        resourceText += `### Based on your PDF content, I recommend:\n\n`;
         
         if (result.pdf_based_search_terms && result.pdf_based_search_terms.length > 0) {
-          resourceText += `*Search strategy: ${result.pdf_based_search_terms.join(', ')}*\n\n`;
+          resourceText += `**Search Strategy:** ${result.pdf_based_search_terms.join(', ')}\n\n`;
         }
       } else {
-        resourceText += `**General learning resources for "${topic}":**\n\n`;
+        resourceText += `### General learning resources for "${resourceTopic}":\n\n`;
       }
       
       if (!result.resources || result.resources.length === 0) {
-        resourceText += "No resources found. Please try a different topic or check your internet connection.";
+        resourceText += "**No resources found.** Please try a different topic or check your internet connection.";
         return resourceText;
       }
       
       resourceText += result.resources.map((resource: any, i: number) => {
-        let resourceEntry = `**${i + 1}. ${resource.title || 'Resource'}** (${resource.type || 'resource'})\n`;
-        resourceEntry += `${resource.description || 'No description available'}\n`;
+        let resourceEntry = `### ${i + 1}. ${resource.title || 'Resource'} \`${resource.type || 'resource'}\`\n`;
+        resourceEntry += `${resource.description || 'No description available'}\n\n`;
         
         // Add PDF relevance explanation if available
         if (resource.pdf_relevance || resource.why_helpful) {
-          resourceEntry += `*💡 Why this helps: ${resource.pdf_relevance || resource.why_helpful}*\n`;
+          resourceEntry += `**Why this helps:** ${resource.pdf_relevance || resource.why_helpful}\n\n`;
         }
         
-        resourceEntry += `[📖 Visit Resource](${resource.url || '#'})`;
+        resourceEntry += `[**Visit Resource**](${resource.url || '#'})`;
         return resourceEntry;
-      }).join('\n\n');
+      }).join('\n\n---\n\n');
       
       // Add identified subtopics if available
       if (result.identified_subtopics && result.identified_subtopics.length > 0) {
-        resourceText += `\n\n**Related topics to explore:** ${result.identified_subtopics.join(', ')}`;
+        resourceText += `\n\n---\n\n### Related topics to explore:\n${result.identified_subtopics.map((topic: string) => `- ${topic}`).join('\n')}`;
       }
       
       return resourceText;
     
     default:
-      return JSON.stringify(result, null, 2);
+      return `## Raw Response\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
   }
 };
+
+// ...existing code...
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -406,17 +454,29 @@ const formatAgentResponse = (agent: string, result: any, userInput: string): str
       if (result.status === 'success') {
         const scorePercentage = Math.round((result.correct_answers / result.total_questions) * 100);
         let encouragement = '';
+        let emoji = '';
         
-        if (scorePercentage >= 90) encouragement = 'Outstanding work! 🎉';
-        else if (scorePercentage >= 80) encouragement = 'Great job! 👏';
-        else if (scorePercentage >= 70) encouragement = 'Good effort! 👍';
-        else encouragement = 'Keep practicing! 💪';
+        if (scorePercentage >= 90) {
+          encouragement = 'Outstanding work!';
+          emoji = '🎉';
+        } else if (scorePercentage >= 80) {
+          encouragement = 'Great job!';
+          emoji = '👏';
+        } else if (scorePercentage >= 70) {
+          encouragement = 'Good effort!';
+          emoji = '👍';
+        } else {
+          encouragement = 'Keep practicing!';
+          emoji = '💪';
+        }
+
+        const detailedResults = result.detailed_results?.map((detail: any, i: number) => 
+          `### Question ${i + 1}: ${detail.is_correct ? '✅ Correct!' : '❌ Incorrect'}\n• **Your answer:** ${detail.user_answer}\n• **Correct answer:** ${detail.correct_answer}${detail.explanation ? `\n• **Explanation:** ${detail.explanation}` : ''}`
+        ).join('\n\n') || 'No detailed results available';
 
         addMessage({
           type: 'assistant',
-          content: `## 📊 Quiz Results - ${encouragement}\n\n**Your Score: ${result.correct_answers}/${result.total_questions}** (${scorePercentage}%)\n\n**Performance Level: ${result.performance}**\n\n### Detailed Review:\n\n${result.detailed_results.map((detail: any, i: number) => 
-            `**Question ${i + 1}:** ${detail.is_correct ? '✅ Correct!' : '❌ Incorrect'}\n• Your answer: **${detail.user_answer}**\n• Correct answer: **${detail.correct_answer}**${detail.explanation ? `\n• *${detail.explanation}*` : ''}`
-          ).join('\n\n')}\n\n${scorePercentage < 80 ? 'Would you like me to explain any of these concepts in more detail?' : 'Excellent work! Ready for another quiz or want to explore a different topic?'}`,
+          content: `## 📊 Quiz Results - ${encouragement} ${emoji}\n\n### 📈 Your Score: ${result.correct_answers}/${result.total_questions} (${scorePercentage}%)\n\n**Performance Level:** \`${result.performance}\`\n\n---\n\n## 📝 Detailed Review:\n\n${detailedResults}\n\n---\n\n${scorePercentage < 80 ? '💡 **Suggestion:** Would you like me to explain any of these concepts in more detail?' : '🎉 **Excellent work!** Ready for another quiz or want to explore a different topic?'}`,
           data: result,
         });
         
@@ -431,6 +491,49 @@ const formatAgentResponse = (agent: string, result: any, userInput: string): str
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Custom Message component that uses MarkdownContent
+  const MessageWithMarkdown = ({ message }: { message: ChatMessage }) => {
+    const isUser = message.type === 'user';
+    const isSystem = message.type === 'system';
+
+    return (
+      <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
+        {!isUser && (
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
+            <Bot className="h-4 w-4 text-white" />
+          </div>
+        )}
+        
+        <Card className={`max-w-[85%] p-4 ${
+          isUser 
+            ? 'bg-primary text-primary-foreground' 
+            : isSystem 
+              ? 'bg-muted/50 border-muted-foreground/20'
+              : 'bg-background border'
+        }`}>
+          <MarkdownContent 
+            content={message.content} 
+            className={`${isUser ? 'text-primary-foreground' : ''}`}
+          />
+          
+          <div className={`text-xs mt-3 pt-2 border-t ${
+            isUser 
+              ? 'text-primary-foreground/70 border-primary-foreground/20' 
+              : 'text-muted-foreground border-border'
+          }`}>
+            {message.timestamp.toLocaleTimeString()}
+          </div>
+        </Card>
+        
+        {isUser && (
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-green-500 to-blue-600 flex items-center justify-center flex-shrink-0">
+            <Bot className="h-4 w-4 text-white" />
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -477,6 +580,9 @@ const formatAgentResponse = (agent: string, result: any, userInput: string): str
               <p className="text-xs text-green-600 dark:text-green-400 mt-2">
                 Your documents are processed and ready for learning!
               </p>
+            {/* <h3 className="text-sm font-medium mb-2 text-gray-800 dark:text-gray-200">Debug Info:</h3>
+            <p className="text-xs text-gray-600 dark:text-gray-400">User ID: {currentUserId}</p>
+            <p className="text-xs text-gray-600 dark:text-gray-400">Files: {uploadedFiles.length}</p> */}
             </Card>
           )}
 
@@ -521,7 +627,7 @@ const formatAgentResponse = (agent: string, result: any, userInput: string): str
         <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
           <div className="max-w-4xl mx-auto space-y-6">
             {messages.map((message) => (
-              <Message key={message.id} message={message} />
+              <MessageWithMarkdown key={message.id} message={message} />
             ))}
             
             {currentQuiz && (
