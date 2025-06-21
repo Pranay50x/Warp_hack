@@ -4,9 +4,10 @@ import { Search, Database, BookOpen, ExternalLink } from "lucide-react";
 
 interface KnowledgeBaseQueryProps {
   onSelectContent?: (content: string) => void;
+  userId: string;
 }
 
-export default function KnowledgeBaseQuery({ onSelectContent }: KnowledgeBaseQueryProps) {
+export default function KnowledgeBaseQuery({ onSelectContent, userId }: KnowledgeBaseQueryProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -22,7 +23,7 @@ export default function KnowledgeBaseQuery({ onSelectContent }: KnowledgeBaseQue
 
     try {
       const response = await fetch(
-        `http://localhost:8000/query-knowledge-base/?query=${encodeURIComponent(query)}&top_k=${topK}&user_id=shared`
+        `http://localhost:8000/query-knowledge-base/?query=${encodeURIComponent(query)}&top_k=${topK}&user_id=${encodeURIComponent(userId)}`
       );
 
       if (!response.ok) {
@@ -146,7 +147,7 @@ export default function KnowledgeBaseQuery({ onSelectContent }: KnowledgeBaseQue
         {!query && !loading && results.length === 0 && (
           <div className="text-center py-4">
             <p className="text-sm text-gray-400">
-              Search the shared knowledge base to find related content from other users' documents
+              Search the knowledge base to find related content from your documents.
             </p>
           </div>
         )}
