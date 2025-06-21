@@ -19,6 +19,16 @@ const QUERY_SUGGESTIONS = [
   { value: "theories", label: "Theories", description: "Focus on theoretical concepts and frameworks" },
 ];
 
+// Mock user object - replace with your actual user state
+const useUser = () => {
+  return {
+    user: {
+      email: "user@gmail.com", // Example email
+    },
+    isLoaded: true,
+  };
+};
+
 export default function MindmapUploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [query, setQuery] = useState("all");
@@ -31,19 +41,15 @@ export default function MindmapUploadPage() {
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
   const [showUserDocuments, setShowUserDocuments] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<string | null>(null);
-  const [userId, setUserId] = useState("default_user");
+  const { user, isLoaded } = useUser(); // Use the mock user hook
+  const [userId, setUserId] = useState("");
   const router = useRouter();
 
   useEffect(() => {
-    const savedUserId = localStorage.getItem("mindmap_user_id");
-    if (savedUserId) {
-      setUserId(savedUserId);
-    } else {
-      const newUserId = `user_${Math.random().toString(36).substr(2, 9)}`;
-      setUserId(newUserId);
-      localStorage.setItem("mindmap_user_id", newUserId);
+    if (isLoaded && user) {
+      setUserId(user.email);
     }
-  }, []);
+  }, [isLoaded, user]);
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -172,6 +178,7 @@ export default function MindmapUploadPage() {
             <p className="text-gray-300">
               Upload your PDF and leverage your personal knowledge base for intelligent mindmap generation.
             </p>
+            {isLoaded && userId && <p className="text-sm text-teal-400 mt-2">Logged in as: {userId}</p>}
           </header>
 
           <section>
@@ -214,7 +221,7 @@ export default function MindmapUploadPage() {
             </button>
             {showKnowledgeBase && (
               <div className="mt-4">
-                <KnowledgeBaseQuery onSelectContent={handleKnowledgeBaseSelect} />
+                <KnowledgeBaseQuery userId={userId} onSelectContent={handleKnowledgeBaseSelect} />
               </div>
             )}
           </section>
