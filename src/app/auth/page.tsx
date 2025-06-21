@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import AuthButton from "@/components/AuthButton";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 
 const perks = [
   {
@@ -24,12 +25,19 @@ const perks = [
 export default function AuthPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const { hasUploadedMaterials, isLoading: onboardingLoading } = useOnboardingStatus();
 
   useEffect(() => {
-    if (status === "authenticated") {
-      router.replace("/dashboard");
+    if (status === "authenticated" && !onboardingLoading) {
+      // If user has uploaded materials, go to dashboard
+      // Otherwise, go to onboarding
+      if (hasUploadedMaterials) {
+        router.replace("/dashboard");
+      } else {
+        router.replace("/onboarding");
+      }
     }
-  }, [status, router]);
+  }, [status, hasUploadedMaterials, onboardingLoading, router]);
 
   return (
     <>
