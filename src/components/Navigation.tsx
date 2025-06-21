@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { BookOpen, Video, Brain, Map, Home, User } from "lucide-react";
+import { BookOpen, Video, Brain, Map, Home, User, BookAIcon } from "lucide-react";
 import { useSession, signIn, signOut } from "next-auth/react";
 
 export default function Navigation() {
@@ -19,6 +19,9 @@ export default function Navigation() {
         <ul className="flex items-center gap-4 md:gap-8 text-gray-200 font-medium text-base">
           <li>
             <Link href="/" className="flex items-center gap-1 hover:text-teal-300 transition"><Home size={18} /> Home</Link>
+          </li>
+          <li>
+            <Link href='/learning' className="flex items-center gap-1 hover:text-teal-300 transition"><BookAIcon  size={18}/>Learn</Link>
           </li>
           <li>
             <Link href="/dashboard" className="flex items-center gap-1 hover:text-teal-300 transition"><BookOpen size={18} /> Dashboard</Link>
