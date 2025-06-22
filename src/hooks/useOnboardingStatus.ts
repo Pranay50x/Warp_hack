@@ -21,7 +21,7 @@ export function useOnboardingStatus(): OnboardingStatus {
     const checkOnboardingStatus = async () => {
       if (status === 'authenticated' && session?.user?.email) {
         try {
-          const response = await fetch(`http://localhost:8002/user-status/${encodeURIComponent(session.user.email)}`);
+          const response = await fetch(`https://b62hc50k-3003.inc1.devtunnels.ms/user-status/${encodeURIComponent(session.user.email)}`);
           
           if (response.ok) {
             const data = await response.json();

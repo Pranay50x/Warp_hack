@@ -1,18 +1,19 @@
 "use client";
 
-import { useState, useRef, useEffect } from 'react';
-import { Send, Upload, Bot, Moon, Sun, FileText, Loader2 } from 'lucide-react';
+import React, { useState, useRef, useEffect, useReducer } from 'react';
+import { Send, Upload, Bot, Moon, Sun, FileText, Loader2, Video, Brain, Map, Download, Sparkles, X, PanelRightOpen, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { FileUpload } from '@/components/file-upload';
-import { Message } from '@/components/message';
 import { QuizInterface } from '@/components/quiz-interface';
 import { MarkdownContent } from '@/components/markdown-content';
 import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
+import { io, Socket } from 'socket.io-client';
+import { AnimatePresence, motion } from 'framer-motion';
+import { useRouter } from 'next/navigation';
 
 export interface ChatMessage {
   id: string;
@@ -22,7 +23,83 @@ export interface ChatMessage {
   data?: any;
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://b62hc50k-5000.inc1.devtunnels.ms/';
+const SOCKET_URL = "https://b62hc50k-5000.inc1.devtunnels.ms/";
+
+type ChatMode = 'explain' | 'video' | 'mindmap';
+
+interface CurrentTask {
+  name: string;
+  status: 'active' | 'completed';
+  startTime: Date;
+}
+
+// --- State Management with useReducer ---
+
+interface AppState {
+  messages: ChatMessage[];
+  isLoading: boolean;
+  uploadedFiles: string[];
+  currentQuiz: any | null;
+  currentTask: CurrentTask | null;
+}
+
+type AppAction =
+  | { type: 'ADD_MESSAGE'; payload: Omit<ChatMessage, 'id' | 'timestamp'> }
+  | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'ADD_UPLOADED_FILE'; payload: string }
+  | { type: 'SET_CURRENT_QUIZ'; payload: any | null }
+  | { type: 'SET_CURRENT_TASK'; payload: CurrentTask | null }
+  | { type: 'AGENT_RESPONSE_SUCCESS'; payload: { newMessage: Omit<ChatMessage, 'id' | 'timestamp'>; quizData: any | null } };
+
+const initialState: AppState = {
+  messages: [
+    {
+      id: '1',
+      type: 'system',
+      content: "Hello! I'm your AI Learning Assistant. You can ask me general questions, or upload a PDF to dive deep into a specific topic.",
+      timestamp: new Date(),
+    }
+  ],
+  isLoading: false,
+  uploadedFiles: [],
+  currentQuiz: null,
+  currentTask: null,
+};
+
+const appReducer = (state: AppState, action: AppAction): AppState => {
+  switch (action.type) {
+    case 'ADD_MESSAGE':
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          { ...action.payload, id: Date.now().toString(), timestamp: new Date() },
+        ],
+      };
+    case 'SET_LOADING':
+      return { ...state, isLoading: action.payload };
+    case 'ADD_UPLOADED_FILE':
+      return { ...state, uploadedFiles: [...state.uploadedFiles, action.payload] };
+    case 'SET_CURRENT_QUIZ':
+      return { ...state, currentQuiz: action.payload };
+    case 'SET_CURRENT_TASK':
+      return { ...state, currentTask: action.payload };
+    case 'AGENT_RESPONSE_SUCCESS':
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          { ...action.payload.newMessage, id: Date.now().toString(), timestamp: new Date() },
+        ],
+        currentQuiz: action.payload.quizData !== null ? action.payload.quizData : state.currentQuiz,
+        isLoading: false,
+        currentTask: null,
+      };
+    default:
+      return state;
+  }
+};
 
 const getUserId = () => {
   let userId = localStorage.getItem('learning_user_id');
@@ -33,26 +110,22 @@ const getUserId = () => {
   return userId;
 };
 
+// --- Main Component ---
 export default function Home() {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: '1',
-      type: 'system',
-      content: 'Hello! I\'m your AI Learning Assistant. Upload a PDF document to get started, and I\'ll help you understand, learn, and test your knowledge on the content. I can explain concepts, generate study questions, create quizzes, find additional resources, and provide motivation!',
-      timestamp: new Date(),
-    }
-  ]);
-
-
+  const [state, dispatch] = useReducer(appReducer, initialState);
+  const { messages, isLoading, uploadedFiles, currentQuiz, currentTask } = state;
 
   const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
-  const [currentQuiz, setCurrentQuiz] = useState<any>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [chatMode, setChatMode] = useState<ChatMode>('explain');
+  const [isRightSidebarOpen, setRightSidebarOpen] = useState(false);
+  
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { theme, setTheme } = useTheme();
-  const [currentUserId] = useState(()=>getUserId());
-
+  const [currentUserId] = useState(getUserId);
+  const router = useRouter();
+  
   const scrollToBottom = () => {
     if (scrollAreaRef.current) {
       const scrollContainer = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
@@ -64,636 +137,371 @@ export default function Home() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
-
+  }, [messages, currentTask]);
+  
   const addMessage = (message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
-    const newMessage: ChatMessage = {
-      ...message,
-      id: Date.now().toString(),
-      timestamp: new Date(),
-    };
-    setMessages(prev => [...prev, newMessage]);
+    dispatch({ type: 'ADD_MESSAGE', payload: message });
   };
+  
+    useEffect(() => {
+    const newSocket = io(SOCKET_URL);
+    setSocket(newSocket);
 
-  // Test backend connection
-  const testBackendConnection = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/health`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+    newSocket.on('connect', () => toast.success('Connected to learning service.'));
+    newSocket.on('disconnect', () => toast.error('Disconnected from learning service.'));
+
+    newSocket.on('tool_start', (data) => {
+      const agentName = data?.[0]?.name || 'Agent';
+      dispatch({ type: 'SET_CURRENT_TASK', payload: {
+        name: `${agentName} is working...`,
+        status: 'active',
+        startTime: new Date()
+      }});
+    });
+
+    newSocket.on('agent_response', (response) => {
+      const agentData = Array.isArray(response) ? response[0] : response;
+      console.log(agentData);
+      let newMessage: Omit<ChatMessage, 'id' | 'timestamp'>;
+      let quizDataForState: any = null;
+
+      if (!agentData || !agentData.message) {
+        toast.error('Received an invalid response from the agent.');
+        newMessage = {
+          type: 'assistant',
+          content: `I received a response I couldn't understand. Please try again.`,
+        };
+      } else {
+        const { message, attachments } = agentData;
+
+        // Handle Mindmap attachments
+        if (attachments && attachments.type === 'mindmap' && attachments.data) {
+          try {
+            const mindmapJson = JSON.parse(attachments.data);
+            newMessage = {
+              type: 'assistant',
+              content: `${message}\n\n<MINDMAP_BUTTON />`, // Simple placeholder
+              data: {
+                ...attachments,
+                mindmapData: mindmapJson // Store the parsed JSON
+              }
+            };
+          } catch (e) {
+            console.error("Failed to parse mindmap data", e);
+            newMessage = {
+              type: 'assistant',
+              content: `${message}\n\n(There was an error displaying the mindmap button.)`,
+            };
+          }
+        }
+        // Handle MP4 video attachments
+        else if (attachments && (attachments.type === 'video/mp4' || attachments.type === 'mp4') && attachments.url) {
+          newMessage = {
+            type: 'assistant',
+            content: `${message}\n\n<VIDEO_PLAYER url="${attachments.url}" />`,
+            data: { videoUrl: attachments.url }
+          };
+        }
+        // Handle JSON quiz data
+        else if (attachments && attachments.type === 'application/json' && attachments.data) {
+            if (message && message.toLowerCase().includes('quiz')) {
+              const quizData = attachments.data;
+              const topicMatch = message.match(/on (.*?):/);
+              const topic = topicMatch ? topicMatch[1] : 'the selected topic';
+              
+              quizDataForState = {
+                quiz_id: Date.now().toString(),
+                topic: topic,
+                questions: quizData.map((q: any) => ({
+                  ...q,
+                  options: q.options.map((opt: any) => (typeof opt === 'string' ? opt : opt.option)),
+                })),
+                total_questions: quizData.length,
+              };
       
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              newMessage = {
+                type: 'assistant',
+                content: `📝 **Quiz Ready!**\n\nI've created a quiz on **"${topic}"** with **${quizDataForState.total_questions} questions**.\n\nGood luck! 🍀`,
+                data: quizDataForState,
+              };
+            } else {
+              // Handle other JSON data if necessary
+              newMessage = { type: 'assistant', content: message, data: attachments.data };
+            }
+        } else {
+          newMessage = { type: 'assistant', content: agentData.message };
+        }
       }
       
-      const result = await response.json();
-      console.log('Backend connection successful:', result);
-      return true;
-    } catch (error) {
-      console.error('Backend connection failed:', error);
-      toast.error('Cannot connect to learning backend. Please make sure the API server is running on port 8000.');
-      return false;
-    }
-  };
+      dispatch({ type: 'AGENT_RESPONSE_SUCCESS', payload: { newMessage, quizData: quizDataForState }});
+      toast.success('Response received!');
+    });
 
-  useEffect(() => {
-    // Test backend connection on component mount
-    testBackendConnection();
+    return () => {
+      newSocket.disconnect();
+    };
   }, []);
 
   const handleFileUpload = async (file: File) => {
-    console.log('Starting file upload...', file.name);
-    
-    // Test backend connection first
-    const isConnected = await testBackendConnection();
-    if (!isConnected) {
-      return;
-    }
-
-    setIsLoading(true);
+    dispatch({ type: 'SET_LOADING', payload: true });
     const formData = new FormData();
     formData.append('pdf_file', file);
-    formData.append('chunk_size', '500');
-    formData.append('overlap', '50');
     formData.append('user_id', currentUserId);
 
     try {
-      console.log('Uploading to:', `${API_BASE_URL}/ingest_pdf`);
-      console.log('With User ID:', currentUserId);
-      
-      
-      const response = await fetch(`${API_BASE_URL}/ingest_pdf`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      console.log('Upload response status:', response.status);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
+      const response = await fetch(`${API_BASE_URL}/ingest_pdf`, { method: 'POST', body: formData });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const result = await response.json();
-      console.log('Upload result:', result);
-
       if (result.status === 'success') {
-        setUploadedFiles(prev => [...prev, result.pdf]);
-        addMessage({
-          type: 'assistant',
-          content: `## 📄 PDF Processing Complete!\n\nPerfect! I've successfully processed **"${result.pdf}"** and created **${result.chunks} knowledge chunks** from it.\n\n### What I can help you with now:\n- 🧠 **Explain complex concepts** from your document\n- ❓ **Generate study questions** to test your understanding\n- 📝 **Create interactive quizzes** with detailed feedback\n- 🔗 **Find additional resources** that complement your material\n- 💪 **Provide study motivation** and learning strategies\n\n**What would you like to explore first?** Just ask me anything about your document!`,
-        });
-        toast.success(`PDF processed successfully! ${result.chunks} chunks created.`);
+        dispatch({ type: 'ADD_UPLOADED_FILE', payload: result.pdf });
+        addMessage({ type: 'assistant', content: `✅ **"${result.pdf}"** has been processed! What would you like to explore first?` });
+        toast.success(`Successfully processed ${result.pdf}`);
       } else {
-        addMessage({
-          type: 'assistant',
-          content: `## ⚠️ Processing Error\n\nI encountered an error while processing your PDF:\n\n> ${result.message}\n\nPlease try uploading the file again or check if it's a valid PDF document.`,
-        });
-        toast.error(`Failed to process PDF: ${result.message}`);
+        throw new Error(result.message);
       }
     } catch (error) {
-      console.error('Upload error:', error);
-      
-      let errorMessage = 'Unknown error occurred';
-      if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        errorMessage = 'Cannot connect to the learning backend. Please ensure the API server is running on port 8000.';
-      } else if (error instanceof Error) {
-        errorMessage = error.message;
-      }
-      
-      addMessage({
-        type: 'assistant',
-        content: `## 🔌 Connection Issue\n\nI'm having trouble connecting to my processing system:\n\n> ${errorMessage}\n\nPlease make sure the backend server is running and try again.`,
-      });
-      toast.error(`Upload failed: ${errorMessage}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      addMessage({ type: 'assistant', content: `⚠️ **Upload Error**: ${errorMessage}` });
+      toast.error(`Failed to process PDF: ${errorMessage}`);
     } finally {
-      setIsLoading(false);
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
-
-  const determineIntent = (userInput: string): { agent: string; confidence: number } => {
-    const input = userInput.toLowerCase();
-    
-    // Quiz-related keywords
-    if (input.includes('quiz') || input.includes('test') || input.includes('mcq') || 
-        input.includes('multiple choice') || input.includes('exam')) {
-      return { agent: 'quiz_agent', confidence: 0.9 };
-    }
-    
-    // Question generation keywords
-    if (input.includes('question') || input.includes('study guide') || 
-        input.includes('what should i know') || input.includes('important points')) {
-      return { agent: 'question_agent', confidence: 0.8 };
-    }
-    
-    // Resource finding keywords
-    if (input.includes('resource') || input.includes('additional') || input.includes('more info') ||
-        input.includes('external') || input.includes('reference') || input.includes('link')) {
-      return { agent: 'resource_curator', confidence: 0.8 };
-    }
-    
-    // Motivation keywords
-    if (input.includes('motivat') || input.includes('encourage') || input.includes('help me study') ||
-        input.includes('struggling') || input.includes('difficult')) {
-      return { agent: 'motivation_agent', confidence: 0.7 };
-    }
-    
-    // Default to concept exploration for explanations and understanding
-    return { agent: 'concept_explorer', confidence: 0.6 };
-  };
-
-  const callAgent = async (userInput: string) => {
-    const intent = determineIntent(userInput);
-    const agent = intent.agent;
-
-    // Check if PDF is required for certain agents
-    if (!uploadedFiles.length && agent !== 'resource_curator' && agent !== 'motivation_agent') {
-      addMessage({
-        type: 'assistant',
-        content: '## 📄 PDF Required\n\nI\'d love to help you with that! However, I need you to upload a PDF document first so I can provide accurate information based on your specific content.\n\n**Please upload a PDF and then ask me again.**',
-      });
-      return;
-    }
-
-    setIsLoading(true);
-
-    try {
-      let endpoint = '';
-      let payload: any = {};
-      let processingMessage = '';
-
-      switch (agent) {
-        case 'concept_explorer':
-          endpoint = '/concept_explorer';
-          payload = { query: userInput, top_k: 8, user_id: currentUserId };
-          processingMessage = '## Analyzing Content\n\nLet me analyze the content and break down this concept for you...';
-          break;
-        case 'question_agent':
-          endpoint = '/question_agent';
-          payload = { topic: userInput, num_questions: 5, top_k: 8, user_id: currentUserId };
-          processingMessage = '## Generating Questions\n\nI\'m generating important study questions based on your document...';
-          break;
-        case 'quiz_agent':
-          endpoint = '/quiz_agent';
-          payload = { topic: userInput, num_questions: 3, top_k: 8, user_id: currentUserId };
-          processingMessage = '## Creating Quiz\n\nCreating an interactive quiz for you...';
-          break;
-        case 'motivation_agent':
-          endpoint = '/motivation_agent';
-          payload = { user_id: currentUserId, quiz_score: null, engagement_data: null };
-          processingMessage = '## Preparing Motivation\n\nLet me provide some encouragement and study tips...';
-          break;
-        case 'resource_curator':
-          endpoint = '/resource_curator';
-          payload = { topic: userInput, num_resources: 5, user_id: currentUserId };
-          processingMessage = '## Finding Resources\n\nSearching for additional learning resources...';
-          break;
-      }
-
-      // Add a processing message
-      addMessage({
-        type: 'assistant',
-        content: processingMessage,
-      });
-
-      console.log('Calling endpoint:', `${API_BASE_URL}${endpoint}`);
-      console.log('With payload:', payload);
-
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      console.log('Agent response:', result);
-
-      // Remove the processing message
-      setMessages(prev => prev.slice(0, -1));
-
-      if (result.status === 'success') {
-        if (agent === 'quiz_agent') {
-          setCurrentQuiz(result);
-          addMessage({
-            type: 'assistant',
-            content: `## 📝 Quiz Ready!\n\nGreat! I've created a quiz on **"${result.topic}"** with **${result.total_questions || result.questions?.length || 3} questions**.\n\n### Instructions:\n- Take your time answering each question\n- You can navigate between questions using the buttons\n- I'll provide detailed feedback once you submit your answers\n\n**Good luck! 🍀**`,
-            data: result,
-          });
-        } else {
-          addMessage({
-            type: 'assistant',
-            content: formatAgentResponse(agent, result, userInput),
-            data: result,
-          });
-        }
-        toast.success('Response generated successfully!');
-      } else {
-        addMessage({
-          type: 'assistant',
-          content: `## ⚠️ Processing Error\n\nI encountered an issue while processing your request:\n\n> ${result.message}\n\nPlease try rephrasing your question or check if your PDF was uploaded correctly.`,
-        });
-        toast.error(`Error: ${result.message}`);
-      }
-    } catch (error) {
-      console.error('Agent call error:', error);
-      
-      let errorMessage = 'Unknown error occurred';
-      if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        errorMessage = 'Cannot connect to the learning backend. Please ensure the API server is running.';
-      } else if (error instanceof Error) {
-        errorMessage = error.message;
-      }
-      
-      // Remove the processing message
-      setMessages(prev => prev.slice(0, -1));
-      addMessage({
-        type: 'assistant',
-        content: `## 🔌 Connection Error\n\nI'm having trouble processing your request right now:\n\n> ${errorMessage}\n\nPlease check your connection and try again.`,
-      });
-      toast.error(`Failed to get response: ${errorMessage}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-// ...existing code...
-
-const formatAgentResponse = (agent: string, result: any, userInput: string): string => {
-  switch (agent) {
-    case 'concept_explorer':
-      const topic = result.topic || userInput;
-      let conceptText = `## Understanding: ${topic}\n\n${result.breakdown}\n\n`;
-      
-      if (result.subtopics && result.subtopics.length > 0) {
-        conceptText += `### Key Areas to Focus On:\n\n`;
-        
-        result.subtopics.forEach((subtopic: any, index: number) => {
-          conceptText += `**${index + 1}. ${subtopic.name}**\n`;
-          if (subtopic.explanation) {
-            conceptText += `${subtopic.explanation}\n`;
-          }
-          if (subtopic.importance) {
-            conceptText += `*Why it matters: ${subtopic.importance}*\n`;
-          }
-          conceptText += `\n`;
-        });
-      } else {
-        conceptText += `### Key Areas to Focus On:\n\nNo specific subtopics were identified from the content.\n\n`;
-      }
-      
-      conceptText += `---\n\n**Next Steps:** Feel free to ask me to dive deeper into any of these areas or ask for study questions!`;
-      return conceptText;
-    
-    case 'question_agent':
-      const questionsText = result.questions && result.questions.length > 0
-        ? result.questions.map((q: any, i: number) => `**${i + 1}.** ${q.question || q}`).join('\n\n')
-        : 'No questions were generated';
-      
-      return `## Study Questions: "${result.topic || userInput}"\n\nHere are some important questions to help you master this topic:\n\n${questionsText}\n\n---\n\n**Study Tip:** Try answering these questions, and if you'd like, I can create a quiz to test your knowledge!`;
-    
-    case 'motivation_agent':
-      const motivationMessage = result.motivation_message || result.message || 'Keep up the great work!';
-      const recommendations = result.recommendations || [];
-      const recommendationsText = recommendations.length > 0 
-        ? recommendations.map((rec: string) => `- ${rec}`).join('\n')
-        : '- Stay consistent with your study schedule\n- Take regular breaks\n- Practice active recall';
-      
-      return `## Study Motivation\n\n${motivationMessage}\n\n### Personalized Recommendations:\n${recommendationsText}\n\n---\n\n**Remember:** Every expert was once a beginner. You have the ability to master this!`;
-    
-    case 'resource_curator':
-      const strategy = result.search_strategy || 'general';
-      const contextSummary = result.context_summary || `Found ${result.resources?.length || 0} learning resources`;
-      const resourceTopic = result.topic || userInput;
-      
-      let resourceText = `## Additional Learning Resources\n\n${contextSummary}\n\n`;
-      
-      if (strategy === 'pdf_contextual') {
-        resourceText += `### Based on your PDF content, I recommend:\n\n`;
-        
-        if (result.pdf_based_search_terms && result.pdf_based_search_terms.length > 0) {
-          resourceText += `**Search Strategy:** ${result.pdf_based_search_terms.join(', ')}\n\n`;
-        }
-      } else {
-        resourceText += `### General learning resources for "${resourceTopic}":\n\n`;
-      }
-      
-      if (!result.resources || result.resources.length === 0) {
-        resourceText += "**No resources found.** Please try a different topic or check your internet connection.";
-        return resourceText;
-      }
-      
-      resourceText += result.resources.map((resource: any, i: number) => {
-        let resourceEntry = `### ${i + 1}. ${resource.title || 'Resource'} \`${resource.type || 'resource'}\`\n`;
-        resourceEntry += `${resource.description || 'No description available'}\n\n`;
-        
-        // Add PDF relevance explanation if available
-        if (resource.pdf_relevance || resource.why_helpful) {
-          resourceEntry += `**Why this helps:** ${resource.pdf_relevance || resource.why_helpful}\n\n`;
-        }
-        
-        resourceEntry += `[**Visit Resource**](${resource.url || '#'})`;
-        return resourceEntry;
-      }).join('\n\n---\n\n');
-      
-      // Add identified subtopics if available
-      if (result.identified_subtopics && result.identified_subtopics.length > 0) {
-        resourceText += `\n\n---\n\n### Related topics to explore:\n${result.identified_subtopics.map((topic: string) => `- ${topic}`).join('\n')}`;
-      }
-      
-      return resourceText;
-    
-    default:
-      return `## Raw Response\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
-  }
-};
-
-// ...existing code...
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !socket) return;
     
-    addMessage({
-      type: 'user',
-      content: input,
-    });
-
-    callAgent(input);
+    let messageToSend = input;
+    if (chatMode === 'video') messageToSend = `${input} generate video`;
+    if (chatMode === 'mindmap') messageToSend = `${input} generate mindmap`;
+    
+    addMessage({ type: 'user', content: input });
+    socket.emit('user_message', { id: currentUserId, message: messageToSend });
     setInput('');
   };
 
-  const handleQuizSubmit = async (quizId: string, answers: string[]) => {
-    setIsLoading(true);
-    
-    try {
-      const response = await fetch(`${API_BASE_URL}/quiz_submit`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          quiz_id: quizId,
-          answers: answers,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-
-      if (result.status === 'success') {
-        const scorePercentage = Math.round((result.correct_answers / result.total_questions) * 100);
-        let encouragement = '';
-        let emoji = '';
-        
-        if (scorePercentage >= 90) {
-          encouragement = 'Outstanding work!';
-          emoji = '🎉';
-        } else if (scorePercentage >= 80) {
-          encouragement = 'Great job!';
-          emoji = '👏';
-        } else if (scorePercentage >= 70) {
-          encouragement = 'Good effort!';
-          emoji = '👍';
-        } else {
-          encouragement = 'Keep practicing!';
-          emoji = '💪';
-        }
-
-        const detailedResults = result.detailed_results?.map((detail: any, i: number) => 
-          `### Question ${i + 1}: ${detail.is_correct ? '✅ Correct!' : '❌ Incorrect'}\n• **Your answer:** ${detail.user_answer}\n• **Correct answer:** ${detail.correct_answer}${detail.explanation ? `\n• **Explanation:** ${detail.explanation}` : ''}`
-        ).join('\n\n') || 'No detailed results available';
-
-        addMessage({
-          type: 'assistant',
-          content: `## 📊 Quiz Results - ${encouragement} ${emoji}\n\n### 📈 Your Score: ${result.correct_answers}/${result.total_questions} (${scorePercentage}%)\n\n**Performance Level:** \`${result.performance}\`\n\n---\n\n## 📝 Detailed Review:\n\n${detailedResults}\n\n---\n\n${scorePercentage < 80 ? '💡 **Suggestion:** Would you like me to explain any of these concepts in more detail?' : '🎉 **Excellent work!** Ready for another quiz or want to explore a different topic?'}`,
-          data: result,
-        });
-        
-        setCurrentQuiz(null);
-        toast.success(`Quiz completed! Score: ${result.correct_answers}/${result.total_questions}`);
-      } else {
-        toast.error(`Quiz submission failed: ${result.message}`);
-      }
-    } catch (error) {
-      console.error('Quiz submission error:', error);
-      toast.error('Failed to submit quiz answers.');
-    } finally {
-      setIsLoading(false);
-    }
+  const handleQuizSubmit = (quizId: string, answers: string[]) => {
+    if (!socket) return toast.error("Not connected.");
+    dispatch({ type: 'SET_LOADING', payload: true });
+    socket.emit('quiz_submit', { quiz_id: quizId, answers, user_id: currentUserId });
   };
-
-  // Custom Message component that uses MarkdownContent
-  const MessageWithMarkdown = ({ message }: { message: ChatMessage }) => {
-    const isUser = message.type === 'user';
-    const isSystem = message.type === 'system';
-
-    return (
-      <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
-        {!isUser && (
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
-            <Bot className="h-4 w-4 text-white" />
-          </div>
-        )}
-        
-        <Card className={`max-w-[85%] p-4 ${
-          isUser 
-            ? 'bg-primary text-primary-foreground' 
-            : isSystem 
-              ? 'bg-muted/50 border-muted-foreground/20'
-              : 'bg-background border'
-        }`}>
-          <MarkdownContent 
-            content={message.content} 
-            className={`${isUser ? 'text-primary-foreground' : ''}`}
-          />
-          
-          <div className={`text-xs mt-3 pt-2 border-t ${
-            isUser 
-              ? 'text-primary-foreground/70 border-primary-foreground/20' 
-              : 'text-muted-foreground border-border'
-          }`}>
-            {message.timestamp.toLocaleTimeString()}
-          </div>
-        </Card>
-        
-        {isUser && (
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-green-500 to-blue-600 flex items-center justify-center flex-shrink-0">
-            <Bot className="h-4 w-4 text-white" />
-          </div>
-        )}
-      </div>
-    );
-  };
-
+  
   return (
-    <div className="flex h-screen bg-background">
-      {/* Sidebar */}
-      <div className="hidden md:flex md:w-80 md:flex-col border-r bg-muted/30">
-        <div className="p-6 border-b">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                <Bot className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <h1 className="text-lg font-semibold">Learning Assistant</h1>
-                <p className="text-xs text-muted-foreground">AI-Powered Learning</p>
-              </div>
+    <div className="flex h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+      <main className="flex-1 flex flex-col transition-all duration-300">
+        <header className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center space-x-3">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+              <Sparkles className="h-4 w-4 text-white" />
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            >
-              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            <h1 className="text-lg font-semibold">Learning Assistant</h1>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+              <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+              <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={() => setRightSidebarOpen(!isRightSidebarOpen)}>
+               <PanelRightOpen className="h-5 w-5" />
             </Button>
           </div>
-        </div>
-        
-        <div className="flex-1 p-6 space-y-6">
-          <FileUpload onFileUpload={handleFileUpload} isLoading={isLoading} />
-          
-          {uploadedFiles.length > 0 && (
-            <Card className="p-4 bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800">
-              <h3 className="text-sm font-medium mb-3 flex items-center text-green-800 dark:text-green-200">
-                <FileText className="h-4 w-4 mr-2" />
-                Ready to Learn
-              </h3>
-              <div className="space-y-2">
-                {uploadedFiles.map((file, i) => (
-                  <Badge key={i} variant="secondary" className="text-xs bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
-                    📄 {file}
-                  </Badge>
-                ))}
-              </div>
-              <p className="text-xs text-green-600 dark:text-green-400 mt-2">
-                Your documents are processed and ready for learning!
-              </p>
-            {/* <h3 className="text-sm font-medium mb-2 text-gray-800 dark:text-gray-200">Debug Info:</h3>
-            <p className="text-xs text-gray-600 dark:text-gray-400">User ID: {currentUserId}</p>
-            <p className="text-xs text-gray-600 dark:text-gray-400">Files: {uploadedFiles.length}</p> */}
-            </Card>
-          )}
+        </header>
 
-          <Card className="p-4 bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
-            <h3 className="text-sm font-medium mb-2 text-blue-800 dark:text-blue-200">💡 What I can help with:</h3>
-            <ul className="text-xs text-blue-600 dark:text-blue-400 space-y-1">
-              <li>• Explain complex concepts</li>
-              <li>• Generate study questions</li>
-              <li>• Create interactive quizzes</li>
-              <li>• Find additional resources</li>
-              <li>• Provide study motivation</li>
-            </ul>
-          </Card>
-        </div>
-      </div>
-
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
-        {/* Header for mobile */}
-        <div className="md:hidden p-4 border-b bg-background/95 backdrop-blur">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                <Bot className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <h1 className="text-lg font-semibold">Learning Assistant</h1>
-                <p className="text-xs text-muted-foreground">AI-Powered Learning</p>
-              </div>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            >
-              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </Button>
-          </div>
-        </div>
-
-        {/* Messages */}
-        <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
-          <div className="max-w-4xl mx-auto space-y-6">
-            {messages.map((message) => (
-              <MessageWithMarkdown key={message.id} message={message} />
-            ))}
-            
-            {currentQuiz && (
-              <QuizInterface 
-                quiz={currentQuiz} 
-                onSubmit={handleQuizSubmit} 
-                isLoading={isLoading}
-              />
-            )}
-            
-            {isLoading && (
-              <div className="flex items-center justify-center space-x-3 text-muted-foreground py-8">
-                <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                </div>
-                <span className="text-sm">Processing...</span>
-              </div>
-            )}
+        <ScrollArea className="flex-1" ref={scrollAreaRef}>
+          <div className="max-w-3xl mx-auto p-4 md:p-8 space-y-6">
+            {messages.map((message) => <ChatMessageBubble key={message.id} message={message} />)}
+            {currentTask && <ThinkingIndicator task={currentTask} />}
+            {currentQuiz && <QuizInterface quiz={currentQuiz} onSubmit={handleQuizSubmit} isLoading={isLoading} />}
           </div>
         </ScrollArea>
 
-        {/* Mobile file upload */}
-        <div className="md:hidden p-4 border-t space-y-4">
-          <FileUpload onFileUpload={handleFileUpload} isLoading={isLoading} />
-          {uploadedFiles.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {uploadedFiles.map((file, i) => (
-                <Badge key={i} variant="secondary" className="text-xs">
-                  📄 {file}
-                </Badge>
-              ))}
+        <footer className="p-4 bg-background/80 backdrop-blur-md">
+          <div className="max-w-3xl mx-auto">
+            <div className="absolute top-[-50px] left-0 right-0 flex justify-center">
+                <ChatModeSelector selectedMode={chatMode} onModeChange={setChatMode} />
             </div>
-          )}
-        </div>
-
-        {/* Input Form */}
-        <div className="p-4 border-t bg-background/95 backdrop-blur">
-          <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
-            <div className="flex space-x-3">
-              <div className="flex-1 relative">
-                <Input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder={uploadedFiles.length > 0 ? "Ask me anything about your document..." : "Upload a PDF first, then ask me anything!"}
-                  disabled={isLoading}
-                  className="pr-12 py-3 text-base"
-                />
-                {isLoading && (
-                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                  </div>
-                )}
-              </div>
-              <Button 
-                type="submit" 
-                disabled={isLoading || !input.trim()}
-                className="px-6 py-3"
-              >
-                <Send className="h-4 w-4" />
+            <div className="relative flex items-center p-2 border rounded-lg bg-background shadow-sm">
+              <Button variant="ghost" size="icon" onClick={() => fileInputRef.current?.click()} disabled={isLoading}>
+                <Upload className="h-5 w-5 text-gray-500" />
+              </Button>
+              <Input ref={fileInputRef} type="file" className="hidden" onChange={(e) => e.target.files && handleFileUpload(e.target.files[0])} accept=".pdf" />
+              <Input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Ask me anything..."
+                className="flex-1 bg-transparent border-none focus-visible:ring-0 focus-visible:ring-offset-0 text-base"
+                disabled={isLoading}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSubmit(e)}
+              />
+              <Button type="submit" size="icon" disabled={isLoading || !input.trim()} className="rounded-full w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 text-white" onClick={handleSubmit}>
+                <ArrowRight className="h-5 w-5" />
               </Button>
             </div>
-          </form>
-        </div>
-      </div>
+            {uploadedFiles.length > 0 && (
+              <div className="text-xs text-center text-gray-500 pt-2">
+                Ready to learn from: {uploadedFiles.map((file, i) => <Badge key={i} variant="secondary" className="mx-1">{file}</Badge>)}
+              </div>
+            )}
+          </div>
+        </footer>
+      </main>
+
+      <AnimatePresence>
+        {isRightSidebarOpen && (
+           <motion.aside 
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 320, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.3, ease: "easeInOut" }}
+              className="bg-white dark:bg-gray-950 border-l border-gray-200 dark:border-gray-800 flex flex-col"
+            >
+             <div className="p-4 border-b flex items-center justify-between">
+                <h2 className="font-semibold">Details</h2>
+                <Button variant="ghost" size="icon" onClick={() => setRightSidebarOpen(false)}>
+                  <X className="h-5 w-5" />
+                </Button>
+             </div>
+             <div className="flex-1 p-4 text-center text-gray-500">
+                <p>Future content will appear here.</p>
+             </div>
+           </motion.aside>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
+// --- Child Components ---
+
+const ChatMessageBubble = ({ message }: { message: ChatMessage }) => {
+  const isUser = message.type === 'user';
+  const isSystem = message.type === 'system';
+  const router = useRouter();
+
+  const handleMindmapView = (mindmapData: any) => {
+    try {
+      localStorage.setItem('latestMindmap', JSON.stringify(mindmapData));
+      router.push('/mindmap/view');
+    } catch (error) {
+      console.error("Failed to save mindmap to local storage", error);
+      toast.error("Could not open mindmap view.");
+    }
+  };
+
+  const renderContent = () => {
+    // Check for mindmap placeholder and if data exists
+    if (message.content.includes('<MINDMAP_BUTTON />') && message.data?.mindmapData) {
+      const parts = message.content.split('<MINDMAP_BUTTON />');
+      return (
+        <>
+          <MarkdownContent content={parts[0]} />
+          <MindmapButton onClick={() => handleMindmapView(message.data.mindmapData)} />
+          {parts[1] && <MarkdownContent content={parts[1]} />}
+        </>
+      );
+    }
+
+    // Check for video placeholder
+    if (message.content.includes('<VIDEO_PLAYER url=')) {
+        const videoRegex = /<VIDEO_PLAYER url="([^"]+)" \/>/g;
+        const parts = message.content.split(videoRegex);
+        return parts.map((part, index) => {
+            if (index % 2 === 1) {
+                return <VideoPlayer key={index} url={part} />;
+            }
+            return <MarkdownContent key={index} content={part} />;
+        });
+    }
+    
+    // Default rendering
+    return <MarkdownContent content={message.content} />;
+  };
+
+  if (isSystem) {
+    return (
+      <div className="text-center text-sm text-gray-500 my-4 p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
+        {message.content}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex items-start gap-3 ${isUser ? 'justify-end' : ''}`}>
+      {!isUser && (
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
+          <Bot className="h-4 w-4 text-white" />
+        </div>
+      )}
+      <div className={`max-w-[80%] p-3 rounded-2xl ${isUser ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800'}`}>
+        <div className="prose prose-sm dark:prose-invert max-w-none">
+          {renderContent()}
+        </div>
+      </div>
+       {isUser && (
+        <div className="w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
+          <span className="text-sm font-semibold">U</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ThinkingIndicator = ({ task }: { task: CurrentTask }) => (
+  <div className="flex items-start gap-3">
+    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
+      <Bot className="h-4 w-4 text-white" />
+    </div>
+    <div className="max-w-[80%] p-3 rounded-2xl bg-white dark:bg-gray-800 flex items-center space-x-2">
+       <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
+       <p className="text-sm text-gray-500 italic">{task.name}</p>
+    </div>
+  </div>
+);
+
+const ChatModeSelector = ({ selectedMode, onModeChange }: { selectedMode: ChatMode; onModeChange: (mode: ChatMode) => void; }) => {
+  const modes = [
+    { id: 'explain' as ChatMode, icon: Brain, label: 'Explain' },
+    { id: 'video' as ChatMode, icon: Video, label: 'Video' },
+    { id: 'mindmap' as ChatMode, icon: Map, label: 'Mind Map' },
+  ];
+  return (
+    <Card className="p-1 flex space-x-1 rounded-lg shadow-md bg-background/80 backdrop-blur-md">
+      {modes.map(mode => (
+        <Button
+          key={mode.id}
+          variant={selectedMode === mode.id ? "secondary" : "ghost"}
+          size="sm"
+          onClick={() => onModeChange(mode.id)}
+          className="flex items-center space-x-2"
+        >
+          <mode.icon className={`h-4 w-4 ${selectedMode === mode.id ? 'text-blue-500' : 'text-gray-500'}`} />
+          <span>{mode.label}</span>
+        </Button>
+      ))}
+    </Card>
+  );
+};
+
+const VideoPlayer = ({ url }: { url: string }) => (
+  <div className="my-2 rounded-lg overflow-hidden border dark:border-gray-700">
+    <video src={url} controls className="w-full" />
+    <div className="p-2 bg-gray-50 dark:bg-gray-800/50">
+       <Button variant="ghost" size="sm" asChild>
+          <a href={url} download target="_blank" rel="noopener noreferrer" className="flex items-center space-x-2">
+            <Download className="h-4 w-4" />
+            <span>Download Video</span>
+          </a>
+       </Button>
+    </div>
+  </div>
+);
+
+const MindmapButton = ({ onClick }: { onClick: () => void }) => (
+  <div className="my-2">
+    <Button onClick={onClick} className="bg-gradient-to-r from-teal-400 to-cyan-500 hover:from-teal-500 hover:to-cyan-600 text-white font-semibold flex items-center space-x-2 shadow-lg">
+      <Brain className="h-5 w-5" />
+      <span>View Interactive Mind Map</span>
+    </Button>
+  </div>
+);

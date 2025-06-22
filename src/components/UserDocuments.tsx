@@ -26,7 +26,7 @@ export default function UserDocuments({ userId, onSelectDocument, onDeleteDocume
     setError("");
     
     try {
-      const response = await fetch(`http://localhost:8000/user-documents/?user_id=${encodeURIComponent(userId)}`);
+      const response = await fetch(`https://b62hc50k-8000.inc1.devtunnels.ms/user-documents/?user_id=${encodeURIComponent(userId)}`);
       
       if (!response.ok) {
         const errorData = await response.json();
@@ -62,7 +62,7 @@ export default function UserDocuments({ userId, onSelectDocument, onDeleteDocume
 
     try {
       const response = await fetch(
-        `http://localhost:8000/delete-document/?filename=${encodeURIComponent(filename)}&user_id=${encodeURIComponent(userId)}`,
+        `https://b62hc50k-3003.inc1.devtunnels.ms/delete-document/?filename=${encodeURIComponent(filename)}&user_id=${encodeURIComponent(userId)}`,
         { method: "DELETE" }
       );
 

@@ -23,7 +23,7 @@ export default function KnowledgeBaseQuery({ onSelectContent, userId }: Knowledg
 
     try {
       const response = await fetch(
-        `http://localhost:8000/query-knowledge-base/?query=${encodeURIComponent(query)}&top_k=${topK}&user_id=${encodeURIComponent(userId)}`
+        `https://b62hc50k-8000.inc1.devtunnels.ms/query-knowledge-base/?query=${encodeURIComponent(query)}&top_k=${topK}&user_id=${encodeURIComponent(userId)}`
       );
 
       if (!response.ok) {

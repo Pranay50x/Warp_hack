@@ -78,7 +78,7 @@ export default function OnboardingPage() {
         if (selectedSubject) formData.append('subject', selectedSubject);
         if (description) formData.append('description', description);
 
-        const response = await fetch('http://localhost:8002/upload', {
+        const response = await fetch('https://b62hc50k-3003.inc1.devtunnels.ms/upload', {
           method: 'POST',
           body: formData,
         });
