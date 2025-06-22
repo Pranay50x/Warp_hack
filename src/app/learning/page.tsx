@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { io, Socket } from 'socket.io-client';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 
 export interface ChatMessage {
   id: string;
@@ -21,6 +22,13 @@ export interface ChatMessage {
   content: string;
   timestamp: Date;
   data?: any;
+}
+
+interface UploadedFile {
+  id: string;
+  name: string;
+  status: 'uploading' | 'success' | 'error';
+  message?: string;
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://b62hc50k-5000.inc1.devtunnels.ms/';
@@ -42,6 +50,7 @@ interface AppState {
   uploadedFiles: string[];
   currentQuiz: any | null;
   currentTask: CurrentTask | null;
+  fileUploads: UploadedFile[];
 }
 
 type AppAction =
@@ -50,7 +59,9 @@ type AppAction =
   | { type: 'ADD_UPLOADED_FILE'; payload: string }
   | { type: 'SET_CURRENT_QUIZ'; payload: any | null }
   | { type: 'SET_CURRENT_TASK'; payload: CurrentTask | null }
-  | { type: 'AGENT_RESPONSE_SUCCESS'; payload: { newMessage: Omit<ChatMessage, 'id' | 'timestamp'>; quizData: any | null } };
+  | { type: 'AGENT_RESPONSE_SUCCESS'; payload: { newMessage: Omit<ChatMessage, 'id' | 'timestamp'>; quizData: any | null } }
+  | { type: 'ADD_FILE_UPLOAD'; payload: UploadedFile }
+  | { type: 'UPDATE_FILE_UPLOAD'; payload: { id: string; status: 'uploading' | 'success' | 'error'; message?: string } };
 
 const initialState: AppState = {
   messages: [
@@ -65,6 +76,7 @@ const initialState: AppState = {
   uploadedFiles: [],
   currentQuiz: null,
   currentTask: null,
+  fileUploads: [],
 };
 
 const appReducer = (state: AppState, action: AppAction): AppState => {
@@ -96,12 +108,27 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         isLoading: false,
         currentTask: null,
       };
+    case 'ADD_FILE_UPLOAD':
+      return {
+        ...state,
+        fileUploads: [...state.fileUploads, action.payload],
+      };
+    case 'UPDATE_FILE_UPLOAD':
+      return {
+        ...state,
+        fileUploads: state.fileUploads.map(f =>
+          f.id === action.payload.id
+            ? { ...f, status: action.payload.status, message: action.payload.message }
+            : f
+        ),
+      };
     default:
       return state;
   }
 };
 
 const getUserId = () => {
+  // This function will be replaced by getSanitizedUserId
   let userId = localStorage.getItem('learning_user_id');
   if (!userId) {
     userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -110,10 +137,25 @@ const getUserId = () => {
   return userId;
 };
 
+const getSanitizedUserId = (email: string | null | undefined): string => {
+  if (!email) {
+    // Fallback to the old method if no email is available
+    let userId = localStorage.getItem('learning_user_id');
+    if (!userId) {
+      userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      localStorage.setItem('learning_user_id', userId);
+    }
+    return userId;
+  }
+  
+  // Sanitize email for ChromaDB: replace @ with _at_ and . with _dot_
+  return email.replace(/@/g, '_at_').replace(/\./g, '_dot_');
+};
+
 // --- Main Component ---
 export default function Home() {
   const [state, dispatch] = useReducer(appReducer, initialState);
-  const { messages, isLoading, uploadedFiles, currentQuiz, currentTask } = state;
+  const { messages, isLoading, uploadedFiles, currentQuiz, currentTask, fileUploads } = state;
 
   const [input, setInput] = useState('');
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -123,7 +165,8 @@ export default function Home() {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { theme, setTheme } = useTheme();
-  const [currentUserId] = useState(getUserId);
+  const { data: session } = useSession();
+  const currentUserId = getSanitizedUserId(session?.user?.email);
   const router = useRouter();
   
   const scrollToBottom = () => {
@@ -138,7 +181,33 @@ export default function Home() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, currentTask]);
-  
+
+  // Global paste event listener for PDF files
+  useEffect(() => {
+    const handleGlobalPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file && file.type === 'application/pdf') {
+            e.preventDefault();
+            handleFileUpload(file);
+            toast.success('PDF file detected from clipboard and uploaded!');
+            break;
+          }
+        }
+      }
+    };
+
+    document.addEventListener('paste', handleGlobalPaste);
+    return () => {
+      document.removeEventListener('paste', handleGlobalPaste);
+    };
+  }, []);
+
   const addMessage = (message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
     dispatch({ type: 'ADD_MESSAGE', payload: message });
   };
@@ -243,28 +312,77 @@ export default function Home() {
   }, []);
 
   const handleFileUpload = async (file: File) => {
-    dispatch({ type: 'SET_LOADING', payload: true });
-    const formData = new FormData();
-    formData.append('pdf_file', file);
-    formData.append('user_id', currentUserId);
+    const fileId = `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Add file to state as uploading
+    dispatch({ type: 'ADD_FILE_UPLOAD', payload: {
+      id: fileId,
+      name: file.name,
+      status: 'uploading'
+    }});
 
     try {
-      const response = await fetch(`${API_BASE_URL}/ingest_pdf`, { method: 'POST', body: formData });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('user_id', session?.user?.email || 'anonymous');
+      formData.append('file_type', 'pdf');
+      formData.append('subject', 'Learning Material');
+      formData.append('description', 'Uploaded via Learning Assistant');
+
+      const response = await fetch('https://b62hc50k-3003.inc1.devtunnels.ms/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
       const result = await response.json();
-      if (result.status === 'success') {
-        dispatch({ type: 'ADD_UPLOADED_FILE', payload: result.pdf });
-        addMessage({ type: 'assistant', content: `✅ **"${result.pdf}"** has been processed! What would you like to explore first?` });
-        toast.success(`Successfully processed ${result.pdf}`);
+
+      dispatch({ type: 'UPDATE_FILE_UPLOAD', payload: {
+        id: fileId,
+        status: response.ok ? 'success' : 'error',
+        message: response.ok ? result.message : result.detail || 'Upload failed'
+      }});
+
+      if (response.ok) {
+        dispatch({ type: 'ADD_UPLOADED_FILE', payload: file.name });
+        addMessage({ type: 'assistant', content: `✅ **"${file.name}"** has been uploaded successfully! What would you like to explore first?` });
+        toast.success(`Successfully uploaded ${file.name}`);
       } else {
-        throw new Error(result.message);
+        addMessage({ type: 'assistant', content: `⚠️ **Upload Error**: ${result.detail || 'Upload failed'}` });
+        toast.error(`Failed to upload ${file.name}: ${result.detail || 'Upload failed'}`);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage = error instanceof Error ? error.message : 'Network error';
+      dispatch({ type: 'UPDATE_FILE_UPLOAD', payload: {
+        id: fileId,
+        status: 'error',
+        message: errorMessage
+      }});
       addMessage({ type: 'assistant', content: `⚠️ **Upload Error**: ${errorMessage}` });
-      toast.error(`Failed to process PDF: ${errorMessage}`);
-    } finally {
-      dispatch({ type: 'SET_LOADING', payload: false });
+      toast.error(`Failed to upload ${file.name}: ${errorMessage}`);
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      handleFileUpload(files[0]);
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file && file.type === 'application/pdf') {
+          e.preventDefault();
+          handleFileUpload(file);
+          toast.success('PDF file detected from clipboard and uploaded!');
+        }
+      }
     }
   };
 
@@ -323,16 +441,24 @@ export default function Home() {
             </div>
             <div className="relative flex items-center p-2 border rounded-lg bg-background shadow-sm">
               <Button variant="ghost" size="icon" onClick={() => fileInputRef.current?.click()} disabled={isLoading}>
-                <Upload className="h-5 w-5 text-gray-500" />
+                {fileUploads.some(f => f.status === 'uploading') ? (
+                  <Loader2 className="h-5 w-5 text-gray-500 animate-spin" />
+                ) : (
+                  <Upload className="h-5 w-5 text-gray-500" />
+                )}
               </Button>
-              <Input ref={fileInputRef} type="file" className="hidden" onChange={(e) => e.target.files && handleFileUpload(e.target.files[0])} accept=".pdf" />
+              {fileUploads.some(f => f.status === 'uploading') && (
+                <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+              )}
+              <Input ref={fileInputRef} type="file" className="hidden" onChange={handleFileInputChange} accept=".pdf" />
               <Input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask me anything..."
+                placeholder="Ask me anything... (Ctrl+V to paste PDF)"
                 className="flex-1 bg-transparent border-none focus-visible:ring-0 focus-visible:ring-offset-0 text-base"
                 disabled={isLoading}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSubmit(e)}
+                onPaste={handlePaste}
               />
               <Button type="submit" size="icon" disabled={isLoading || !input.trim()} className="rounded-full w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 text-white" onClick={handleSubmit}>
                 <ArrowRight className="h-5 w-5" />
@@ -341,6 +467,15 @@ export default function Home() {
             {uploadedFiles.length > 0 && (
               <div className="text-xs text-center text-gray-500 pt-2">
                 Ready to learn from: {uploadedFiles.map((file, i) => <Badge key={i} variant="secondary" className="mx-1">{file}</Badge>)}
+              </div>
+            )}
+            {fileUploads.length > 0 && (
+              <div className="text-xs text-center text-gray-500 pt-2">
+                Recent uploads: {fileUploads.map((file, i) => (
+                  <Badge key={i} variant={file.status === 'success' ? 'default' : file.status === 'error' ? 'destructive' : 'secondary'} className="mx-1">
+                    {file.name} ({file.status})
+                  </Badge>
+                ))}
               </div>
             )}
           </div>
